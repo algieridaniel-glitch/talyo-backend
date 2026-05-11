@@ -1,9 +1,7 @@
-import pytesseract
-import cv2
-import numpy as np
-from fastapi import FastAPI, UploadFile, File
+import os
+import requests
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import re
 
 app = FastAPI()
 
@@ -15,22 +13,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/scan-targa")
-async def scan_targa(file: UploadFile = File(...)):
-    contents = await file.read()
-    nparr = np.frombuffer(contents, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+# Recuperiamo la chiave segreta dalle impostazioni di Render (la imposteremo dopo)
+API_USERNAME = os.getenv("REGCHECK_USER", "MOCK_MODE")
 
-    # Convertiamo in scala di grigi per aiutare l'OCR
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-   
-    # Tesseract legge l'immagine
-    text = pytesseract.image_to_string(gray, config='--psm 7') # psm 7 è ottimizzato per singole righe di testo
-   
-    # Pulizia del testo: teniamo solo lettere e numeri (formato targa)
-    clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())
-   
-    if len(clean_text) >= 6:
-        return {"risultati": [{"targa": clean_text, "affidabilita": 1.0}]}
-    else:
-        return {"risultati": [], "debug": clean_text}
+@app.get("/info-veicolo/{targa}")
+async def get_info_veicolo(targa: str):
+    # --- MODALITÀ TEST (Senza API Key) ---
+    if API_USERNAME == "MOCK_MODE":
+        return {
+            "success": True,
+            "data": {
+                "marca": "SEAT",
+                "modello": "Alhambra (Test)",
+                "alimentazione": "Diesel",
+                "classe_euro": "Euro 6",
+                "scadenza_rca": "15/07/2026",
+                "targa": targa.upper()
+            }
+        }
+
+    # --- MODALITÀ REALE (Con RegCheck) ---
+    # Esempio per RegCheck (Italia)
+    url = f"https://www.regcheck.org.uk/api/reg.asmx/CheckItaly?RegistrationNumber={targa}&username={API_USERNAME}"
+    
+    try:
+        # In un'app reale qui useremmo un parser XML/JSON per pulire i dati
+        # Per ora facciamo una chiamata base
+        response = requests.get(url)
+        if response.status_code == 200:
+            return {"success": True, "raw_data": response.text}
+        else:
+            return {"success": False, "error": "API non raggiungibile"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
