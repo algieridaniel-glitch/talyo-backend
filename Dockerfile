@@ -1,6 +1,6 @@
-FROM python : 3.9-slim
+FROM python:3.9-slim
 
-# Installiamo Tesseract e le librerie necessarie per far girare OpenCV
+# Installiamo Tesseract e le librerie necessarie per OpenCV
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libgl1 \
