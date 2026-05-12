@@ -35,7 +35,6 @@ async def scan_targa(file: UploadFile = File(...)):
 
 @app.get("/info-veicolo/{targa}")
 async def get_info_veicolo(targa: str):
-    # Endpoint specifico della foto che mi hai mandato (Dynamic Sol)
     url = "https://informazioni-targhe.p.rapidapi.com/job/submitwiththeftverification"
     payload = {"targhe": [targa.upper()], "op": "rca"}
     headers = {
@@ -48,20 +47,13 @@ async def get_info_veicolo(targa: str):
         response = requests.post(url, json=payload, headers=headers)
         res_json = response.json()
        
-        # ESTRAZIONE DATI (Adattata per Dynamic Sol)
-        # Questa API di solito restituisce una lista in 'data' o 'result'
-        veicolo = {}
-        if "data" in res_json and len(res_json["data"]) > 0:
-            veicolo = res_json["data"][0] # Prende il primo veicolo trovato
-        elif "result" in res_json:
-            veicolo = res_json["result"]
-
+        # TRUCCO MAGICO: Invece di cercare la marca, stampiamo TUTTA la risposta
         return {
             "success": True,
             "data": {
-                "marca": veicolo.get("marca", veicolo.get("make", "Non trovata")),
-                "modello": veicolo.get("modello", veicolo.get("model", "Non trovato")),
-                "scadenza_rca": veicolo.get("assicurazione", {}).get("scadenza", "N/D"),
+                "marca": "DATI GREZZI RICEVUTI:",
+                "modello": str(res_json),  # <--- Qui vedremo la verità
+                "scadenza_rca": "Guarda sopra",
                 "targa": targa.upper()
             }
         }
