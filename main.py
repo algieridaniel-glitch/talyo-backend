@@ -8,7 +8,9 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
-
+@app.get("/")
+async def root():
+    return {"message": "Talyo Backend è attivo e funzionante!"}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
