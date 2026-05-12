@@ -45,67 +45,53 @@ async def get_info_veicolo(targa: str):
     }
 
     try:
-        # 1. Chiediamo il ticket
+        # 1. Ticket
         response_ticket = requests.post(url_submit, json=payload, headers=headers)
         dati_ticket = response_ticket.json()
        
         if "job_id" not in dati_ticket:
-            return {"success": False, "error": "Errore ticket API", "dati": str(dati_ticket)}
+            return {"success": False, "error": "Errore ticket API"}
            
         job_id = dati_ticket["job_id"]
         url_retrieve = f"https://informazioni-targhe.p.rapidapi.com/job/retrieve?job={job_id}"
        
-        # 2. SISTEMA DI POLLING (Bussiamo finché non risponde)
+        # 2. Polling
         dati_finali = {}
-        for tentativo in range(5): # Proviamo per massimo 5 volte (15 secondi totali)
-            await asyncio.sleep(3) # Aspettiamo 3 secondi tra un tentativo e l'altro
-           
+        for tentativo in range(5):
+            await asyncio.sleep(3)
             response_dati = requests.get(url_retrieve, headers=headers)
             dati_finali = response_dati.json()
-           
-            # Se la risposta contiene qualcosa in più del semplice "job_id", ha finito!
-            if len(dati_finali) > 1 or "data" in dati_finali or "result" in dati_finali:
+            if len(dati_finali) > 1 or "data" in dati_finali or isinstance(dati_finali, list):
                 break
 
-        stringa_debug = str(dati_finali)
-
-        # 3. Estrazione sicura dei dati
-        marca = ""
-        modello = ""
-        scadenza = "N/D"
-       
-        veicolo = {}
+        # 3. ESTRAZIONE DATI MIRATA SUL TUO SCREENSHOT
+        blocco_data = {}
+        # L'API invia una lista con dentro un dizionario
         if isinstance(dati_finali, list) and len(dati_finali) > 0:
-            veicolo = dati_finali[0]
+            blocco_data = dati_finali[0].get("data", {})
         elif isinstance(dati_finali, dict):
-            if "data" in dati_finali and isinstance(dati_finali["data"], list) and len(dati_finali["data"]) > 0:
-                veicolo = dati_finali["data"][0]
-            elif "result" in dati_finali and isinstance(dati_finali["result"], list) and len(dati_finali["result"]) > 0:
-                veicolo = dati_finali["result"][0]
-            else:
-                veicolo = dati_finali
+            blocco_data = dati_finali.get("data", dati_finali)
 
-        if isinstance(veicolo, dict):
-            # Cerca le info nei sottomenu più comuni
-            info_auto = veicolo.get("veicolo", veicolo)
-            if isinstance(info_auto, dict):
-                marca = info_auto.get("marca", info_auto.get("make", info_auto.get("brand", "")))
-                modello = info_auto.get("modello", info_auto.get("model", ""))
-           
-            info_assicurazione = veicolo.get("assicurazione", veicolo.get("rca", veicolo))
-            if isinstance(info_assicurazione, dict):
-                scadenza = info_assicurazione.get("scadenza", info_assicurazione.get("data_scadenza", "N/D"))
+        # Cerchiamo marca/modello se ci sono, altrimenti usiamo il tipo veicolo (es. "Autoveicolo")
+        marca = blocco_data.get("marca", blocco_data.get("costruttore", "N/D"))
+        modello = blocco_data.get("modello", blocco_data.get("modelloVeicolo", blocco_data.get("descrizioneTipoVeicolo", "N/D")))
 
-        # Se fallisce ancora l'estrazione, stampa l'intero pacco per farcelo leggere
-        if not marca and not modello:
-            return {"success": True, "data": {"marca": "VERITÀ:", "modello": stringa_debug[:250], "scadenza_rca": "N/D", "targa": targa.upper()}}
+        # Lettura dello stato assicurativo
+        ass_presente = str(blocco_data.get("assicurazionePresente", "")).lower()
+       
+        if ass_presente == "false":
+            scadenza = "SCADUTA / NON ASSICURATA"
+        elif ass_presente == "true":
+            scadenza = blocco_data.get("dataScadenza", blocco_data.get("scadenza", "Assicurata (Scadenza N/D)"))
+        else:
+            scadenza = "Dato non disponibile"
 
         return {
             "success": True,
             "data": {
-                "marca": str(marca).capitalize(),
-                "modello": str(modello).capitalize(),
-                "scadenza_rca": str(scadenza),
+                "marca": str(marca).capitalize() if marca != "N/D" else "N/D",
+                "modello": str(modello).capitalize() if modello != "N/D" else "N/D",
+                "scadenza_rca": scadenza,
                 "targa": targa.upper()
             }
         }
