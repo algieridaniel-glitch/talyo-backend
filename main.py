@@ -22,18 +22,43 @@ API_KEY = os.getenv("RAPID_API_KEY")
 
 @app.get("/")
 async def root():
-    return {"status": "online", "message": "Talyo Backend operativo!"}
+    return {"status": "online", "message": "Talyo Backend - OCR Potenziato attivo!"}
 
+# --- FUNZIONE OCR MIGLIORATA ---
 @app.post("/scan-targa")
 async def scan_targa(file: UploadFile = File(...)):
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    text = pytesseract.image_to_string(gray, config='--psm 7')
-    targa_letta = re.sub(r'[^A-Z0-9]', '', text.upper())
-    return {"risultati": [{"targa": targa_letta}]}
 
+    # 1. Conversione in scala di grigi
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # 2. Ingrandimento (aiuta a leggere caratteri piccoli)
+    gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+
+    # 3. Riduzione del rumore (Denoising)
+    denoised = cv2.fastNlMeansDenoising(gray, h=10)
+
+    # 4. Contrasto estremo (Otsu's Thresholding)
+    # Trasforma l'immagine in bianco e nero netto
+    _, thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # 5. Configurazione Tesseract
+    # PSM 7: Tratta l'immagine come una singola riga di testo
+    # Whitelist: Cerca solo lettere maiuscole e numeri
+    custom_config = r'--oem 3 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+   
+    text = pytesseract.image_to_string(thresh, config=custom_config)
+   
+    # Pulizia finale della stringa (rimuove spazi o simboli rimasti)
+    targa_letta = re.sub(r'[^A-Z0-9]', '', text.upper())
+
+    print(f"OCR Potenziato - Targa letta: {targa_letta}")
+   
+    return {"risultati": [{"targa": targa_letta}], "debug": text.strip()}
+
+# --- FUNZIONE INFO VEICOLO (Invariata) ---
 @app.get("/info-veicolo/{targa}")
 async def get_info_veicolo(targa: str):
     url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submitwiththeftverification"
@@ -45,54 +70,42 @@ async def get_info_veicolo(targa: str):
     }
 
     try:
-        # 1. Chiediamo il ticket
         response_ticket = requests.post(url_submit, json=payload, headers=headers)
         dati_ticket = response_ticket.json()
-       
-        if "job_id" not in dati_ticket:
+        job_id = dati_ticket.get("job_id")
+
+        if not job_id:
             return {"success": False, "error": "Errore ticket API"}
-           
-        job_id = dati_ticket["job_id"]
+
         url_retrieve = f"https://informazioni-targhe.p.rapidapi.com/job/retrieve?job={job_id}"
-       
-        # 2. Polling (Aspettiamo i dati)
         dati_finali = {}
         for _ in range(5):
             await asyncio.sleep(3)
-            response_dati = requests.get(url_retrieve, headers=headers)
-            dati_finali = response_dati.json()
-            if len(dati_finali) > 1 or "data" in dati_finali or isinstance(dati_finali, list):
+            res = requests.get(url_retrieve, headers=headers)
+            dati_finali = res.json()
+            if isinstance(dati_finali, list) and len(dati_finali) > 0 and "data" in dati_finali[0]:
                 break
 
-        # 3. ESTRAZIONE PULITA DAI DATI
-        blocco_data = {}
-        if isinstance(dati_finali, list) and len(dati_finali) > 0:
-            blocco_data = dati_finali[0].get("data", {})
-        elif isinstance(dati_finali, dict):
-            blocco_data = dati_finali.get("data", dati_finali)
+        info = dati_finali[0].get("data", {}) if isinstance(dati_finali, list) and len(dati_finali) > 0 else {}
+       
+        tipo_veicolo = info.get("descrizioneTipoVeicolo", "N/D")
+        compagnia = info.get("compagniaAssicurativa", "N/D")
+        is_assicurata = str(info.get("assicurazionePresente", "")).lower()
 
-        # Mappiamo i dati trovati
-        tipo = blocco_data.get("descrizioneTipoVeicolo", "N/D").capitalize()
-        compagnia = blocco_data.get("compagniaAssicurativa", "Non specificata")
-        ass_presente = str(blocco_data.get("assicurazionePresente", "")).lower()
-
-        if ass_presente == "false":
+        stato_rca = "N/D"
+        if is_assicurata == "true":
+            stato_rca = "✅ ASSICURATA"
+        elif is_assicurata == "false":
             stato_rca = "❌ NON ASSICURATA"
-            compagnia = "Nessuna polizza attiva"
-        elif ass_presente == "true":
-            stato_rca = "✅ ATTIVA"
-        else:
-            stato_rca = "⚠️ Dati non disponibili"
 
         return {
             "success": True,
             "data": {
-                "marca": tipo,              # Sul sito apparirà sotto "Marca"
-                "modello": compagnia,       # Sul sito apparirà sotto "Modello"
-                "scadenza_rca": stato_rca,  # Sul sito apparirà sotto "Assicurazione"
+                "marca": tipo_veicolo.capitalize(),
+                "modello": compagnia,
+                "scadenza_rca": stato_rca,
                 "targa": targa.upper()
             }
         }
-
     except Exception as e:
         return {"success": False, "error": str(e)}
