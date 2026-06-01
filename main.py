@@ -82,7 +82,3 @@ async def elabora_targa_testo(richiesta: TargaRicevutaApp):
 @app.get("/")
 async def porta_ingresso():
     return {"status": "ONLINE 🟢"}
-
-# (Nota: Ho rimosso le altre funzioni per brevità, 
-# se ti servono le altre porte come /scan-targa, 
-# assicurati di averle tutte nel file finale!)
