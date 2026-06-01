@@ -324,7 +324,7 @@ class TargaRicevutaApp(BaseModel):
     targa: str
 
 # 2. Creiamo la porta esatta a cui bussa l'app Android
-@app.post("/scan-targa")
+@app.post("/preventivo-app")
 async def elabora_targa_testo(richiesta: TargaRicevutaApp):
     try:
         targa_pulita = richiesta.targa.upper().replace(" ", "")
