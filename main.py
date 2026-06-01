@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import random
 from fastapi.middleware.cors import CORSMiddleware
-
+from database import inizializza_db, SessionLocal, PolizzaAutovettura, ScansioneRadar
 # Inizializza l'app
 app = FastAPI()
 
