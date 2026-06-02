@@ -5,3 +5,4 @@ requests
 pytesseract
 opencv-python-headless
 numpy
+sqlalchemy
