@@ -1,16 +1,13 @@
 from fastapi import FastAPI, Depends
 from pydantic import BaseModel
-import random
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-# Importiamo la struttura del database dal tuo file database.py
+# Importiamo gli strumenti dal TUO file database.py
 from database import inizializza_db, SessionLocal, PolizzaAutovettura
 
-# Inizializza l'app
 app = FastAPI()
 
-# Permette all'app Android di comunicare senza blocchi
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,10 +16,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 1. Creiamo le tabelle fisiche nel file talyo.db all'avvio
+# Inizializza il database all'avvio
 inizializza_db()
 
-# 2. Funzione per aprire e chiudere il cassetto del database in modo sicuro
 def get_db():
     db = SessionLocal()
     try:
@@ -30,11 +26,51 @@ def get_db():
     finally:
         db.close()
 
-# Definisce il pacchetto che ci manda l'app Android
 class TargaRicevutaApp(BaseModel):
     targa: str
 
 @app.get("/")
+async def porta_ingresso():
+    return {"status": "ONLINE 🟢"}
+
+@app.post("/preventivo-app")
+async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depends(get_db)):
+    targa_pulita = richiesta.targa.upper().replace(" ", "")
+    
+    # 1. INTERROGAZIONE DB: Cerchiamo se abbiamo già salvato questa targa
+    preventivo_db = db.query(PolizzaAutovettura).filter(PolizzaAutovettura.targa == targa_pulita).first()
+    
+    if preventivo_db:
+        # GIA' ESISTE: Restituiamo i dati letti dal disco
+        return {
+            "preventivo_id": f"PREV-{preventivo_db.id}",
+            "targa": preventivo_db.targa,
+            "modello": "Fiat Panda",
+            "compagnia_attuale": "Prima Assicurazioni",
+            "cilindrata": "1600",
+            "prezzo_stimato_min": int(preventivo_db.importo),
+            "prezzo_stimato_max": int(preventivo_db.importo) + 150
+        }
+    else:
+        # NUOVO RECORD: Lo creiamo e lo salviamo nel database
+        nuova_polizza = PolizzaAutovettura(
+            targa=targa_pulita,
+            importo=294.0, # Prezzo fisso per ora
+            stato_pagamento="Preventivo generato"
+        )
+        db.add(nuova_polizza)
+        db.commit()
+        db.refresh(nuova_polizza) # Aggiorna la variabile con l'ID appena creato da SQLite
+        
+        return {
+            "preventivo_id": f"PREV-{nuova_polizza.id}",
+            "targa": targa_pulita,
+            "modello": "Fiat Panda",
+            "compagnia_attuale": "Prima Assicurazioni",
+            "cilindrata": "1600",
+            "prezzo_stimato_min": 294,
+            "prezzo_stimato_max": 444
+        }@app.get("/")
 async def porta_ingresso():
     return {"status": "ONLINE 🟢 - Database Connesso"}
 
