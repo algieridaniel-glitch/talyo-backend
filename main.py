@@ -45,21 +45,14 @@ async def porta_ingresso():
 async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depends(get_db)):
     targa_pulita = richiesta.targa.upper().replace(" ", "")
     
-    # 1. CONTROLLO CACHE: Vediamo se la targa esiste già nel DB locale
-    preventivo_db = db.query(PolizzaAutovettura).filter(PolizzaAutovettura.targa == targa_pulita).first()
+    # -----------------------------------------------------------------
+    # DISATTIVATO TEMPORANEAMENTE PER IL DEBUG: Forza la chiamata live
+    # -----------------------------------------------------------------
+    # preventivo_db = db.query(PolizzaAutovettura).filter(PolizzaAutovettura.targa == targa_pulita).first()
+    # if preventivo_db:
+    #     ...
     
-    if preventivo_db:
-        return {
-            "preventivo_id": f"PREV-{preventivo_db.id}",
-            "targa": preventivo_db.targa,
-            "modello": "Dato d'Archivio (Cache)",
-            "compagnia_attuale": "Prima Assicurazioni",
-            "cilindrata": "1600",
-            "prezzo_stimato_min": int(preventivo_db.importo),
-            "prezzo_stimato_max": int(preventivo_db.importo) + 150
-        }
-    
-    # Valori di default se l'API non risponde
+    # Valori di default se l'API fallisce o le chiavi JSON sono diverse
     modello_reale = "Veicolo Generico"
     compagnia_reale = "UnipolSai"
     cilindrata_reale = "1400"
@@ -67,7 +60,6 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
     
     # 2. CHIAMATA RAPIDAPI IN TEMPO REALE
     try:
-        # Configurazione degli header completi per informazioni-targhe
         headers = {
             "X-RapidAPI-Key": RAPID_API_KEY,
             "X-RapidAPI-Host": "informazioni-targhe.p.rapidapi.com"
@@ -96,7 +88,7 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
     nuova_polizza = PolizzaAutovettura(
         targa=targa_pulita,
         importo=prezzo_calcolato,
-        stato_pagamento="Calcolato via RapidAPI"
+        stato_pagamento="Calcolato via RapidAPI Realtime"
     )
     db.add(nuova_polizza)
     db.commit()
@@ -107,7 +99,7 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
         "preventivo_id": f"PREV-{nuova_polizza.id}",
         "targa": targa_pulita,
         "modello": modello_reale,
-        "compagnia_attuale": compagnia_reale,
+        "compagnia_attuale": "Prima Assicurazioni" if compagnia_reale == "Prima Assicurazioni" else compagnia_reale,
         "cilindrata": cilindrata_reale,
         "prezzo_stimato_min": int(prezzo_calcolato),
         "prezzo_stimato_max": int(prezzo_calcolato) + 120
