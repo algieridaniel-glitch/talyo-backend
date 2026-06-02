@@ -23,7 +23,9 @@ inizializza_db()
 
 # Recuperiamo la chiave dal tuo screenshot di Render
 RAPID_API_KEY = os.getenv("RAPID_API_KEY")
-API_URL_REALE = "https://informazioni-targhe.p.rapidapi.com/targa/" 
+
+# URL Base pulito senza la barra finale per la gestione a parametri
+API_URL_REALE = "https://informazioni-targhe.p.rapidapi.com/targa" 
 
 def get_db():
     db = SessionLocal()
@@ -43,22 +45,27 @@ async def porta_ingresso():
 async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depends(get_db)):
     targa_pulita = richiesta.targa.upper().replace(" ", "")
     
-    # Valori di default
+    # Valori di default in caso di mancata risposta
     modello_reale = "Veicolo Generico"
     compagnia_reale = "UnipolSai"
     cilindrata_reale = "1400"
     prezzo_calcolato = 294.0  
     
+    # CHIAMATA RAPIDAPI CON PARAMETRI DI QUERY
     try:
         headers = {
             "X-RapidAPI-Key": RAPID_API_KEY,
             "X-RapidAPI-Host": "informazioni-targhe.p.rapidapi.com"
         }
         
+        # Passiamo la targa come parametro pulito (?targa=...)
+        parametri_query = {"targa": targa_pulita}
+        
         async with httpx.AsyncClient() as client:
             risposta_esterna = await client.get(
-                f"{API_URL_REALE}{targa_pulita}", 
+                API_URL_REALE, 
                 headers=headers, 
+                params=parametri_query, 
                 timeout=8.0
             )
             
@@ -66,7 +73,7 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
             dati_api = risposta_esterna.json()
             print(f"DEBUG API REALE: {dati_api}")
             
-            # Scaviamo se i dati sono dentro 'result' o 'data'
+            # Scaviamo nel JSON per estrarre le proprietà dell'auto
             res = dati_api.get("result", dati_api.get("data", dati_api))
             
             modello_reale = res.get("modello", res.get("marca_modello", res.get("marca", "Fiat Panda")))
@@ -83,11 +90,11 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
     except Exception as e:
         modello_reale = f"Crash codice: {str(e)[:25]}"
 
-    # Salviamo nel DB locale
+    # Salviamo il log del tentativo nel DB locale
     nuova_polizza = PolizzaAutovettura(
         targa=targa_pulita,
         importo=prezzo_calcolato,
-        stato_pagamento="Test Realtime Spia"
+        stato_pagamento="Test Query Params"
     )
     db.add(nuova_polizza)
     db.commit()
