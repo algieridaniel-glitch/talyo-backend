@@ -1,40 +1,85 @@
-from fastapi import FastAPI, Depends
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
+import sys
+import traceback
 
-# Importiamo gli strumenti dal TUO file database.py
-from database import inizializza_db, SessionLocal, PolizzaAutovettura
+# Mettiamo tutto dentro una gabbia di sicurezza per catturare il crash
+try:
+    from fastapi import FastAPI, Depends
+    from pydantic import BaseModel
+    from fastapi.middleware.cors import CORSMiddleware
+    from sqlalchemy.orm import Session
 
-app = FastAPI()
+    # Importiamo dal tuo file database.py
+    from database import inizializza_db, SessionLocal, PolizzaAutovettura
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    app = FastAPI()
 
-# Inizializza il database all'avvio
-inizializza_db()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    # Inizializza il database
+    inizializza_db()
 
-class TargaRicevutaApp(BaseModel):
-    targa: str
+    def get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
 
-@app.get("/")
-async def porta_ingresso():
-    return {"status": "ONLINE 🟢"}
+    class TargaRicevutaApp(BaseModel):
+        targa: str
 
-@app.post("/preventivo-app")
-async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depends(get_db)):
+    @app.get("/")
+    async def porta_ingresso():
+        return {"status": "ONLINE 🟢"}
+
+    @app.post("/preventivo-app")
+    async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depends(get_db)):
+        targa_pulita = richiesta.targa.upper().replace(" ", "")
+        preventivo_db = db.query(PolizzaAutovettura).filter(PolizzaAutovettura.targa == targa_pulita).first()
+        
+        if preventivo_db:
+            return {
+                "preventivo_id": f"PREV-{preventivo_db.id}",
+                "targa": preventivo_db.targa,
+                "modello": "Fiat Panda",
+                "compagnia_attuale": "Prima Assicurazioni",
+                "cilindrata": "1600",
+                "prezzo_stimato_min": int(preventivo_db.importo),
+                "prezzo_stimato_max": int(preventivo_db.importo) + 150
+            }
+        else:
+            nuova_polizza = PolizzaAutovettura(
+                targa=targa_pulita,
+                importo=294.0,
+                stato_pagamento="Preventivo generato"
+            )
+            db.add(nuova_polizza)
+            db.commit()
+            db.refresh(nuova_polizza)
+            
+            return {
+                "preventivo_id": f"PREV-{nuova_polizza.id}",
+                "targa": targa_pulita,
+                "modello": "Fiat Panda",
+                "compagnia_attuale": "Prima Assicurazioni",
+                "cilindrata": "1600",
+                "prezzo_stimato_min": 294,
+                "prezzo_stimato_max": 444
+            }
+
+except Exception as e:
+    # Se il server crasha, questo blocco stamperà il motivo reale nei log di Render
+    print("\n" + "="*50)
+    print("🚨 ERRORE FATALE ALL'AVVIO DEL SERVER: 🚨")
+    print(traceback.format_exc())
+    print("="*50 + "\n")
+    sys.exit(1)async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depends(get_db)):
     targa_pulita = richiesta.targa.upper().replace(" ", "")
     
     # 1. INTERROGAZIONE DB: Cerchiamo se abbiamo già salvato questa targa
