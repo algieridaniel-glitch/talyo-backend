@@ -74,7 +74,6 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
         }
         
         async with httpx.AsyncClient() as client:
-            # Uniamo l'URL alla targa (es: .../targa/DK334KZ)
             risposta_esterna = await client.get(
                 f"{API_URL_REALE}{targa_pulita}", 
                 headers=headers, 
@@ -84,7 +83,7 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
         if risposta_esterna.status_code == 200:
             dati_api = risposta_esterna.json()
             
-            # Estraiamo i dati dal JSON (Adatta i nomi se il fornitore usa chiavi diverse)
+            # Estraiamo i dati dal JSON dell'API reale
             modello_reale = dati_api.get("modello", dati_api.get("marca_modello", "Fiat Panda"))
             compagnia_reale = dati_api.get("compagnia", "Prima Assicurazioni")
             cilindrata_reale = str(dati_api.get("cilindrata", "1600"))
@@ -108,7 +107,7 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
         "preventivo_id": f"PREV-{nuova_polizza.id}",
         "targa": targa_pulita,
         "modello": modello_reale,
-        "compagnia_attuale": companionship_reale if 'compagnia_reale' in locals() else compagnia_reale,
+        "compagnia_attuale": compagnia_reale,
         "cilindrata": cilindrata_reale,
         "prezzo_stimato_min": int(prezzo_calcolato),
         "prezzo_stimato_max": int(prezzo_calcolato) + 120
