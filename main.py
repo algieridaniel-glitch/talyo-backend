@@ -62,32 +62,28 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
                 timeout=8.0
             )
             
-        if risposta_externa.status_code == 200:
+        if risposta_esterna.status_code == 200:
             dati_api = risposta_esterna.json()
             print(f"DEBUG API REALE: {dati_api}")
             
-            # TRUCCO DI CONTROLLO: Proviamo a scavare se i dati sono dentro 'result' o 'data'
+            # Scaviamo se i dati sono dentro 'result' o 'data'
             res = dati_api.get("result", dati_api.get("data", dati_api))
             
-            # Tentiamo il recupero con più varianti possibili di nomi
             modello_reale = res.get("modello", res.get("marca_modello", res.get("marca", "Fiat Panda")))
             compagnia_reale = res.get("compagnia", "Prima Assicurazioni")
             cilindrata_reale = str(res.get("cilindrata", "1600"))
             prezzo_calcolato = float(res.get("prezzo", 294.0))
             
-            # Se trova la marca ma non il modello, uniamoli
             if "marca" in res and "modello" in res and res["marca"] != res["modello"]:
                 modello_reale = f"{res['marca']} {res['modello']}"
                 
         else:
-            # Se RapidAPI risponde male (es. 401, 403, 404), lo stampiamo sul telefono
             modello_reale = f"Errore API: Stato {risposta_esterna.status_code}"
             
     except Exception as e:
-        # Se c'è un crash di rete o timeout, vedrai l'errore sul telefono
-        modello_reale = f"Crash rete: {str(e)[:25]}"
+        modello_reale = f"Crash codice: {str(e)[:25]}"
 
-    # Salviamo comunque il tentativo nel DB locale
+    # Salviamo nel DB locale
     nuova_polizza = PolizzaAutovettura(
         targa=targa_pulita,
         importo=prezzo_calcolato,
