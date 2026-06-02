@@ -23,8 +23,6 @@ inizializza_db()
 
 # Recuperiamo la chiave dal tuo screenshot di Render
 RAPID_API_KEY = os.getenv("RAPID_API_KEY")
-
-# Il tuo URL reale recuperato da RapidAPI
 API_URL_REALE = "https://informazioni-targhe.p.rapidapi.com/targa/" 
 
 def get_db():
@@ -45,20 +43,12 @@ async def porta_ingresso():
 async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depends(get_db)):
     targa_pulita = richiesta.targa.upper().replace(" ", "")
     
-    # -----------------------------------------------------------------
-    # DISATTIVATO TEMPORANEAMENTE PER IL DEBUG: Forza la chiamata live
-    # -----------------------------------------------------------------
-    # preventivo_db = db.query(PolizzaAutovettura).filter(PolizzaAutovettura.targa == targa_pulita).first()
-    # if preventivo_db:
-    #     ...
-    
-    # Valori di default se l'API fallisce o le chiavi JSON sono diverse
+    # Valori di default
     modello_reale = "Veicolo Generico"
     compagnia_reale = "UnipolSai"
     cilindrata_reale = "1400"
     prezzo_calcolato = 294.0  
     
-    # 2. CHIAMATA RAPIDAPI IN TEMPO REALE
     try:
         headers = {
             "X-RapidAPI-Key": RAPID_API_KEY,
@@ -72,34 +62,46 @@ async def elabora_targa_database(richiesta: TargaRicevutaApp, db: Session = Depe
                 timeout=8.0
             )
             
-        if risposta_esterna.status_code == 200:
+        if risposta_externa.status_code == 200:
             dati_api = risposta_esterna.json()
+            print(f"DEBUG API REALE: {dati_api}")
             
-            # Estraiamo i dati dal JSON dell'API reale
-            modello_reale = dati_api.get("modello", dati_api.get("marca_modello", "Fiat Panda"))
-            compagnia_reale = dati_api.get("compagnia", "Prima Assicurazioni")
-            cilindrata_reale = str(dati_api.get("cilindrata", "1600"))
-            prezzo_calcolato = float(dati_api.get("prezzo", 294.0))
+            # TRUCCO DI CONTROLLO: Proviamo a scavare se i dati sono dentro 'result' o 'data'
+            res = dati_api.get("result", dati_api.get("data", dati_api))
+            
+            # Tentiamo il recupero con più varianti possibili di nomi
+            modello_reale = res.get("modello", res.get("marca_modello", res.get("marca", "Fiat Panda")))
+            compagnia_reale = res.get("compagnia", "Prima Assicurazioni")
+            cilindrata_reale = str(res.get("cilindrata", "1600"))
+            prezzo_calcolato = float(res.get("prezzo", 294.0))
+            
+            # Se trova la marca ma non il modello, uniamoli
+            if "marca" in res and "modello" in res and res["marca"] != res["modello"]:
+                modello_reale = f"{res['marca']} {res['modello']}"
+                
+        else:
+            # Se RapidAPI risponde male (es. 401, 403, 404), lo stampiamo sul telefono
+            modello_reale = f"Errore API: Stato {risposta_esterna.status_code}"
             
     except Exception as e:
-        print(f"Errore chiamata RapidAPI: {str(e)}")
+        # Se c'è un crash di rete o timeout, vedrai l'errore sul telefono
+        modello_reale = f"Crash rete: {str(e)[:25]}"
 
-    # 3. SALVATAGGIO STORICO SU DATABASE
+    # Salviamo comunque il tentativo nel DB locale
     nuova_polizza = PolizzaAutovettura(
         targa=targa_pulita,
         importo=prezzo_calcolato,
-        stato_pagamento="Calcolato via RapidAPI Realtime"
+        stato_pagamento="Test Realtime Spia"
     )
     db.add(nuova_polizza)
     db.commit()
     db.refresh(nuova_polizza)
     
-    # 4. RISPOSTA ALL'APPLICAZIONE ANDROID
     return {
         "preventivo_id": f"PREV-{nuova_polizza.id}",
         "targa": targa_pulita,
         "modello": modello_reale,
-        "compagnia_attuale": "Prima Assicurazioni" if compagnia_reale == "Prima Assicurazioni" else compagnia_reale,
+        "compagnia_attuale": compagnia_reale,
         "cilindrata": cilindrata_reale,
         "prezzo_stimato_min": int(prezzo_calcolato),
         "prezzo_stimato_max": int(prezzo_calcolato) + 120
