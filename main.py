@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 # Importiamo i componenti dal tuo file database.py
-from app.database import inizializza_db, SessionLocal, PolizzaAutovettura
+from database import inizializza_db, SessionLocal, PolizzaAutovettura
 
 app = FastAPI()
 
