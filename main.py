@@ -114,19 +114,23 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             # IL CODICE SEGRETO SVELATO: "type" è una stringa "rcauto"!
             payload_str = '{"targhe":["' + targa_pulita + '"],"type":"rcauto"}'
             
-           res_submit = await client.post(url_submit, content=payload_str, headers=headers)
+            try:
+            # --- FASE 1: SUBMIT (Creazione dell'ordine) ---
+            url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
             
-            # 1. SALVIAMO LA RISPOSTA INTERA IN UNA VARIABILE (Questa è la riga che mancava!)
+            # IL CODICE SEGRETO SVELATO: "type" è una stringa "rcauto"!
+            payload_str = '{"targhe":["' + targa_pulita + '"],"type":"rcauto"}'
+            
+            res_submit = await client.post(url_submit, content=payload_str, headers=headers)
+            
             risposta_provider = res_submit.json()
             
-            # 2. CERCHIAMO IL JOB ID ALL'INTERNO DELLA RISPOSTA
             job_id = risposta_provider.get("job_id")
             
             if not job_id:
-                # 3. ORA PUÒ STAMPARE CORRETTAMENTE IL MESSAGGIO A SCHERMO
                 raise HTTPException(
                     status_code=500, 
-                    detail=f"Job ID mancante. Risposta esatta: {risposta_provider}"
+                    detail=f"Job ID mancante. Risposta esatta del provider: {risposta_provider}"
                 )
             
            
