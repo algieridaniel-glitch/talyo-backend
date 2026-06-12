@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 
 # --- IMPORT INTERNI (Dai tuoi file) ---
 from database import inizializza_db, SessionLocal, PolizzaAutovettura, ScansioneRadar
-from app.radar_worker import scheduler
-from app.security import cripta_codice_fiscale, decripta_codice_fiscale
+from radar_worker import scheduler
+from security import cripta_codice_fiscale, decripta_codice_fiscale
 
 # --- SETUP SICUREZZA E VARIABILI AMBIENTE ---
 load_dotenv()
