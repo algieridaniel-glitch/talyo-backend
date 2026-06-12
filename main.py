@@ -167,3 +167,11 @@ async def vedi_tutte_le_polizze(db: Session = Depends(get_db)):
 @app.get("/api/v1/test-gdpr/{codice_fiscale}")
 def test_sicurezza_gdpr(codice_fiscale: str):
     return {"sicurezza": "Conforme al GDPR 🛡️"}
+
+@app.get("/")
+async def root():
+    return {
+        "sistema": "Talyo.it Backend",
+        "stato": "ONLINE 🟢",
+        "messaggio": "Il cuore di Talyo batte regolarmente!"
+    }
