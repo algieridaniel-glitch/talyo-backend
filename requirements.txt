@@ -12,3 +12,4 @@ python-dotenv
 stripe
 twilio
 apscheduler
+cryptography
