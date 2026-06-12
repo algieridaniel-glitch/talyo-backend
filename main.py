@@ -25,19 +25,16 @@ load_dotenv()
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 RAPID_API_KEY = os.getenv("RAPID_API_KEY")
 
-app = FastAPI(title="Talyo.it API", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Il Buttafuori: Header richiesto
+header_sicurezza = APIKeyHeader(name="X-API-KEY")
+CHIAVE_SEGRETA = os.getenv("TALYO_API_KEY", "LaMiaPasswordSegreta2026!")
 
-# --- MODELLI DATI ---
-class TargaRicevutaApp(BaseModel):
-    targa: str
+# --- FUNZIONI DI SUPPORTO ---
+def verifica_permessi(api_key_ricevuta: str = Security(header_sicurezza)):
+    if api_key_ricevuta != CHIAVE_SEGRETA:
+        raise HTTPException(status_code=401, detail="Accesso Negato.")
+    return api_key_ricevuta
 
-class RichiestaCheckout(BaseModel):
-    targa: str
-    importo_euro: float
-    compagnia: str
-
-# --- DIPENDENZE E LIFESPAN ---
 def get_db():
     db = SessionLocal()
     try: yield db
@@ -50,8 +47,20 @@ async def lifespan(app: FastAPI):
     yield
     scheduler.shutdown()
 
+app = FastAPI(title="Talyo.it API", version="1.0.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# --- MODELLI DATI ---
+class TargaRicevutaApp(BaseModel):
+    targa: str
+
+class RichiestaCheckout(BaseModel):
+    targa: str
+    importo_euro: float
+    compagnia: str
+
 # ========================================================
-# 1. PREVENTIVO (LOGICA CORRETTA PER RAPID API)
+# 1. PREVENTIVO (LOGICA OTTIMIZZATA)
 # ========================================================
 @app.post("/preventivo-app")
 async def calcola_preventivo(dati: TargaRicevutaApp):
@@ -67,27 +76,25 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
 
     async with httpx.AsyncClient() as client:
         try:
-            # Invio Richiesta
+            # Invio
             res_submit = await client.post(url_submit, json=payload_dict, headers=headers)
             
-            # Se errore, mostriamo il dettaglio reale per debuggare il 422
+            # Controllo Errori
             if res_submit.status_code != 200:
                 raise HTTPException(status_code=res_submit.status_code, detail=f"ERRORE {res_submit.status_code}: {res_submit.text}")
             
             risposta_submit = res_submit.json()
             
-            # Controllo: il provider ha già i dati o serve polling?
+            # Logica Polling
             if "targa" in risposta_submit or "modello" in risposta_submit:
                 dati_auto = risposta_submit
             else:
                 job_id = risposta_submit.get("job_id")
-                if not job_id:
-                    raise HTTPException(status_code=500, detail="Job ID mancante dal provider")
+                if not job_id: raise HTTPException(status_code=500, detail="Job ID mancante")
                 
                 url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
                 dati_auto = None
                 
-                # Polling esteso
                 for _ in range(30):
                     await asyncio.sleep(4)
                     res_status = await client.get(url_status, headers=headers)
@@ -101,10 +108,8 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
                         elif stato in ["failed", "error"]:
                             raise HTTPException(status_code=500, detail="Errore elaborazione provider")
                 
-                if not dati_auto:
-                    raise HTTPException(status_code=408, detail="Timeout: Elaborazione troppo lunga")
+                if not dati_auto: raise HTTPException(status_code=408, detail="Timeout: Elaborazione lunga")
 
-            # Formattazione per l'App
             if isinstance(dati_auto, list): dati_auto = dati_auto[0]
             
             return {
@@ -120,25 +125,44 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             raise HTTPException(status_code=500, detail=f"Errore critico: {str(e)}")
 
 # ========================================================
-# 2. OCR, STRIPE, ADMIN, GDPR (RESTO DEL CODICE)
+# 2. OCR TARGHE
 # ========================================================
-
 @app.post("/api/v1/radar/scansiona")
-async def scansiona_targa(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def scansiona_targa(file: UploadFile = File(...), db: Session = Depends(get_db), auth: str = Depends(verifica_permessi)):
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    # ... (Il resto della tua logica OCR rimane identico)
-    return {"status": "successo", "targa_rilevata": "TEST"} 
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, binarizzata = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # OCR Logic
+    testo_estratto = pytesseract.image_to_string(binarizzata, config='--psm 8')
+    targa_pulita = "".join(e for e in testo_estratto if e.isalnum()).upper()
+    
+    nuova_scansione = ScansioneRadar(targa=targa_pulita, testo_grezzo=testo_estratto.strip())
+    db.add(nuova_scansione)
+    db.commit()
+    return {"status": "successo", "targa": targa_pulita}
 
+# ========================================================
+# 3. STRIPE & ADMIN
+# ========================================================
 @app.post("/api/v1/checkout/crea-sessione")
-async def crea_sessione_pagamento(dati: RichiestaCheckout):
-    # ... (La tua logica Stripe originale)
-    return {"status": "successo", "url": "https://stripe.com/..."}
+async def crea_sessione_pagamento(dati: RichiestaCheckout, auth: str = Depends(verifica_permessi)):
+    importo_centesimi = int(dati.importo_euro * 100)
+    sessione = stripe.checkout.Session.create(
+        payment_method_types=['card'],
+        line_items=[{'price_data': {'currency': 'eur', 'product_data': {'name': 'Polizza Auto'}, 'unit_amount': importo_centesimi}, 'quantity': 1}],
+        mode='payment',
+        success_url='http://127.0.0.1:8000/',
+        cancel_url='http://127.0.0.1:8000/'
+    )
+    return {"url_pagamento": sessione.url}
 
 @app.get("/api/v1/admin/polizze")
 async def vedi_tutte_le_polizze(db: Session = Depends(get_db)):
-    return {"status": "successo", "totale": 0}
+    lista = db.query(PolizzaAutovettura).all()
+    return {"totale": len(lista), "dati": lista}
 
 @app.get("/api/v1/test-gdpr/{codice_fiscale}")
 def test_sicurezza_gdpr(codice_fiscale: str):
