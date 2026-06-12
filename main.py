@@ -61,21 +61,22 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             # --- FASE 1: SUBMIT (Creazione dell'ordine) ---
             url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
             
-            # Usiamo il dizionario standard e lasciamo che httpx lo formatti in JSON
+            # IL TRUCCO: Formattiamo il JSON a mano togliendo tutti gli spazi!
             payload_dict = {"targhe": [targa_pulita], "type": ["details"]}
+            payload_str = json.dumps(payload_dict, separators=(',', ':'))
             
-            res_submit = await client.post(url_submit, json=payload_dict, headers=headers)
+            # Usiamo 'content=payload_str' invece di 'json=...'
+            res_submit = await client.post(url_submit, content=payload_str, headers=headers)
             
-            # Se l'API rifiuta, blocchiamo tutto subito e mostriamo PERCHÉ
             if res_submit.status_code != 200:
                 raise HTTPException(
                     status_code=400, 
-                    detail=f"L'API ha rifiutato. Risposta: {res_submit.text} | Payload inviato: {payload_dict}"
+                    detail=f"L'API ha rifiutato. Risposta: {res_submit.text} | Payload crudo inviato: {payload_str}"
                 )
             
             job_id = res_submit.json().get("job_id")
             if not job_id:
-                raise HTTPException(status_code=500, detail="Job ID mancante nella risposta del provider.")
+                raise HTTPException(status_code=500, detail="Job ID mancante nella risposta.")
 
             # --- FASE 2: STATUS POLLING ---
             url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
@@ -86,7 +87,7 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
                 res_status = await client.get(url_status, headers=headers)
                 
                 if res_status.status_code != 200:
-                    continue # Ignora errori temporanei e riprova
+                    continue 
                     
                 stato_attuale = res_status.json().get("status", "").lower()
                 if stato_attuale in ["completed", "done", "success"]:
@@ -108,10 +109,9 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             dati_auto = res_retrieve.json()
             
         except HTTPException:
-            # Rilanciamo le eccezioni HTTP pulite per non farcele catturare dal blocco generico sotto
             raise 
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Errore interno del server: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Errore interno: {str(e)}")
 
         # --- FASE 4: MAPPATURA JSON ---
         if isinstance(dati_auto, list) and len(dati_auto) > 0:
