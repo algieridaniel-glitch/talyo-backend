@@ -43,8 +43,9 @@ async def porta_ingresso():
 
 
 @app.post("/preventivo-app")
-async def calcola_preventivo(targa: str):
-    targa_pulita = targa.upper().replace(" ", "")
+async def calcola_preventivo(dati: TargaRicevutaApp): # <-- IL TRUCCO È QUI!
+    # Estraiamo la targa dall'oggetto JSON che ci manda l'app
+    targa_pulita = dati.targa.upper().replace(" ", "")
     
     headers = {
         "x-rapidapi-key": os.getenv("RAPID_API_KEY"), # Prelevata dal file .env
