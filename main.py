@@ -135,33 +135,34 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
                     detail=f"Job ID mancante. Risposta: {risposta_provider}"
                 )
             
-            # --- FASE 2: STATUS POLLING (Chiediamo se è pronto) ---
+            # --- FASE 2: STATUS POLLING ESTESO ---
             url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
             
             job_completato = False
-            ultima_risposta = {} # <-- Memoria per spiare cosa dice il server
+            ultima_risposta = {"status": "attesa_iniziale"} 
             
-            for tentativo in range(15):
-                await asyncio.sleep(3) 
+            # Aumentiamo la pazienza a 30 tentativi da 4 secondi (2 minuti totali!)
+            for tentativo in range(30):
+                await asyncio.sleep(4) 
                 res_status = await client.get(url_status, headers=headers)
                 
                 if res_status.status_code == 200:
                     ultima_risposta = res_status.json()
-                    
-                    # Estraiamo lo stato, convertendolo in minuscolo per evitare problemi di maiuscole
                     stato_attuale = str(ultima_risposta.get("status", "")).lower()
+                    
+                    # Logghiamo lo stato per vedere cosa succede nei log di Render
+                    print(f"Tentativo {tentativo}: Stato = {stato_attuale}")
                     
                     if stato_attuale in ["completed", "done", "success", "finished", "ready"]:
                         job_completato = True
                         break
-                    elif stato_attuale in ["failed", "error"]:
-                        raise HTTPException(status_code=500, detail=f"Fallito: {ultima_risposta}")
+                    elif stato_attuale in ["failed", "error", "cancelled"]:
+                        raise HTTPException(status_code=500, detail=f"Il fornitore ha segnalato errore: {ultima_risposta}")
             
-            if not job_completato:
-                # LA TRAPPOLA: Se va in timeout, stampiamo l'ultimo messaggio esatto del provider!
+            if not job_end: # (Era job_completato, correggi se serve)
                 raise HTTPException(
                     status_code=408, 
-                    detail=f"Timeout! Il provider diceva questo: {ultima_risposta}"
+                    detail=f"Timeout dopo 2 minuti. Risposta finale: {ultima_risposta}"
                 )
 
             # --- FASE 3: RETRIEVE (Scarichiamo i dati finali) ---
