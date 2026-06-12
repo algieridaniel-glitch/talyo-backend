@@ -9,3 +9,4 @@ sqlalchemy
 httpx
 pydantic
 python-dotenv
+stripe
