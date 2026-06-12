@@ -61,22 +61,26 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             # --- FASE 1: SUBMIT (Creazione dell'ordine) ---
             url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
             
-            # IL TRUCCO: Formattiamo il JSON a mano togliendo tutti gli spazi!
-            payload_dict = {"targhe": [targa_pulita], "type": ["details"]}
-            payload_str = json.dumps(payload_dict, separators=(',', ':'))
+            # Semplifichiamo drasticamente il payload togliendo le liste se possibile, 
+            # ma se il provider vuole per forza le liste, usiamo json.dumps in modo standard
+            payload = {
+                "targhe": [targa_pulita],
+                "type": ["details"]
+            }
             
-            # Usiamo 'content=payload_str' invece di 'json=...'
-            res_submit = await client.post(url_submit, content=payload_str, headers=headers)
+            # Usiamo 'json=payload' che è il metodo standard di httpx per gestire i dict
+            res_submit = await client.post(
+                url_submit, 
+                json=payload, 
+                headers=headers
+            )
             
+            # DEBUG: Se fallisce, vediamo esattamente cosa dice il server
             if res_submit.status_code != 200:
                 raise HTTPException(
                     status_code=400, 
-                    detail=f"L'API ha rifiutato. Risposta: {res_submit.text} | Payload crudo inviato: {payload_str}"
+                    detail=f"Errore API {res_submit.status_code}: {res_submit.text}"
                 )
-            
-            job_id = res_submit.json().get("job_id")
-            if not job_id:
-                raise HTTPException(status_code=500, detail="Job ID mancante nella risposta.")
 
             # --- FASE 2: STATUS POLLING ---
             url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
