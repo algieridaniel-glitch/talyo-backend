@@ -53,7 +53,7 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
         "x-rapidapi-key": os.getenv("RAPID_API_KEY"),
         "x-rapidapi-host": "informazioni-targhe.p.rapidapi.com",
         "Content-Type": "application/json",
-        "Accept": "application/json" # <--- IMPEDISCE LE PAGINE HTML DI ERRORE
+        "Accept": "application/json"
     }
 
     async with httpx.AsyncClient() as client:
@@ -61,59 +61,59 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             # --- FASE 1: SUBMIT (Creazione dell'ordine) ---
             url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
             
-            # Creiamo il dizionario e lo forziamo in una stringa di testo pura senza spazi extra
+            # Usiamo il dizionario standard e lasciamo che httpx lo formatti in JSON
             payload_dict = {"targhe": [targa_pulita], "type": ["details"]}
-            payload_str = json.dumps(payload_dict, separators=(',', ':'))
             
-            # Usiamo 'content=payload_str' invece di 'json=...' per avere il controllo totale
-            res_submit = await client.post(url_submit, content=payload_str, headers=headers)
+            res_submit = await client.post(url_submit, json=payload_dict, headers=headers)
             
-            # Se ci dà ancora errore, ora stamperà il VERO motivo in JSON, non una pagina HTML!
+            # Se l'API rifiuta, blocchiamo tutto subito e mostriamo PERCHÉ
             if res_submit.status_code != 200:
-                raise HTTPException(status_code=res_submit.status_code, detail=f"Errore dal Provider: {res_submit.text}")
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"L'API ha rifiutato. Risposta: {res_submit.text} | Payload inviato: {payload_dict}"
+                )
             
             job_id = res_submit.json().get("job_id")
             if not job_id:
-                raise HTTPException(status_code=500, detail="Job ID non ricevuto dal provider.")
+                raise HTTPException(status_code=500, detail="Job ID mancante nella risposta del provider.")
 
-            # ... (TUTTO IL RESTO DA FASE 2 IN POI RIMANE IDENTICO A PRIMA) ...
-
-            # --- FASE 2: STATUS POLLING (Chiediamo se è pronto) ---
+            # --- FASE 2: STATUS POLLING ---
             url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
             
             job_completato = False
-            max_tentativi = 6 # Riprova per max ~12 secondi
-            
-            for tentativo in range(max_tentativi):
-                await asyncio.sleep(2) # Pausa di 2 secondi tra i controlli
-                
+            for tentativo in range(6):
+                await asyncio.sleep(2) 
                 res_status = await client.get(url_status, headers=headers)
-                stato_dati = res_status.json()
                 
-                # Verifichiamo il campo status (es. "completed", "done", "success")
-                stato_attuale = stato_dati.get("status", "").lower()
+                if res_status.status_code != 200:
+                    continue # Ignora errori temporanei e riprova
+                    
+                stato_attuale = res_status.json().get("status", "").lower()
                 if stato_attuale in ["completed", "done", "success"]:
                     job_completato = True
                     break
                 elif stato_attuale in ["failed", "error"]:
-                    raise HTTPException(status_code=500, detail="Il provider ha fallito l'elaborazione della targa.")
+                    raise HTTPException(status_code=500, detail="Il provider ha fallito l'elaborazione.")
             
             if not job_completato:
                 raise HTTPException(status_code=408, detail="Timeout: L'API ci ha messo troppo tempo.")
 
-            # --- FASE 3: RETRIEVE (Scarichiamo i dati finali) ---
+            # --- FASE 3: RETRIEVE ---
             url_retrieve = f"https://informazioni-targhe.p.rapidapi.com/job/retrieve?job={job_id}"
             res_retrieve = await client.get(url_retrieve, headers=headers)
+            
+            if res_retrieve.status_code != 200:
+                raise HTTPException(status_code=500, detail="Errore nel recupero dati finali.")
+                
             dati_auto = res_retrieve.json()
             
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=f"Errore API: {e.response.text}")
+        except HTTPException:
+            # Rilanciamo le eccezioni HTTP pulite per non farcele catturare dal blocco generico sotto
+            raise 
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Errore di connessione: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Errore interno del server: {str(e)}")
 
-        # --- FASE 4: PREPARAZIONE DEL JSON PER IL PIXEL 7 PRO ---
-        # ATTENZIONE: Questi sono nomi di default. Quando vedremo il JSON vero, metteremo le chiavi esatte!
-        # Se i dati tornano in una lista, prendiamo il primo elemento
+        # --- FASE 4: MAPPATURA JSON ---
         if isinstance(dati_auto, list) and len(dati_auto) > 0:
             dati_auto = dati_auto[0]
             
