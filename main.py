@@ -108,18 +108,13 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
 
     async with httpx.AsyncClient() as client:
         try:
-            # FASE 1: SUBMIT (Creazione dell'ordine con formato stringa cruda per evitare l'errore 400)
+            ## --- FASE 1: SUBMIT (Creazione dell'ordine) ---
             url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
-            payload_str = '{"targa": "' + targa_pulita + '"}'
+            
+            # IL CODICE SEGRETO SVELATO: "type" è una stringa "rcauto"!
+            payload_str = '{"targhe":["' + targa_pulita + '"],"type":"rcauto"}'
             
             res_submit = await client.post(url_submit, content=payload_str, headers=headers)
-            
-            if res_submit.status_code != 200:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Errore API {res_submit.status_code}: {res_submit.text} | Inviato: {payload_str}"
-                )
-
             job_id = res_submit.json().get("job_id")
             if not job_id:
                 raise HTTPException(status_code=500, detail="Job ID non ricevuto dal provider.")
