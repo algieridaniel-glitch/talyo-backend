@@ -111,13 +111,16 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             # --- FASE 1: SUBMIT (Creazione dell'ordine) ---
             url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
             
-            # IL CODICE SEGRETO SVELATO: "type" è una stringa "rcauto"!
-            payload_str = '{"targhe":["' + targa_pulita + '"],"type":"rcauto"}'
+            # La formula perfetta: "targhe" è una lista, "type" è una stringa semplice!
+            payload_dict = {
+                "targhe": [targa_pulita],
+                "type": "rcauto"
+            }
             
-            res_submit = await client.post(url_submit, content=payload_str, headers=headers)
+            # Usiamo 'json=payload_dict' per far creare a Python un JSON immacolato
+            res_submit = await client.post(url_submit, json=payload_dict, headers=headers)
             
             risposta_provider = res_submit.json()
-            
             job_id = risposta_provider.get("job_id")
             
             if not job_id:
