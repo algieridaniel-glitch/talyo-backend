@@ -292,4 +292,4 @@ def test_sicurezza_gdpr(codice_fiscale: str):
         "2_come_viene_salvato_nel_database": cf_protetto,
         "3_come_lo_legge_per_preventivo": cf_sbloccato,
         "sicurezza": "Conforme al GDPR 🛡️"
-    }
+ }
