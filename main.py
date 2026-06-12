@@ -110,7 +110,7 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
         try:
             # FASE 1: SUBMIT (Creazione dell'ordine con formato stringa cruda per evitare l'errore 400)
             url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
-            payload_str = '{"targhe":["' + targa_pulita + '"],"type":["details"]}'
+            payload_str = '{"targa": "' + targa_pulita + '"}'
             
             res_submit = await client.post(url_submit, content=payload_str, headers=headers)
             
