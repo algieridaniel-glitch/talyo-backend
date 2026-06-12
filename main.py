@@ -1,5 +1,8 @@
 import os
 import httpx
+import asyncio
+import uuid
+import json
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,28 +46,37 @@ async def porta_ingresso():
 
 
 @app.post("/preventivo-app")
-async def calcola_preventivo(dati: TargaRicevutaApp): # <-- IL TRUCCO È QUI!
-    # Estraiamo la targa dall'oggetto JSON che ci manda l'app
+async def calcola_preventivo(dati: TargaRicevutaApp):
     targa_pulita = dati.targa.upper().replace(" ", "")
     
     headers = {
-        "x-rapidapi-key": os.getenv("RAPID_API_KEY"), # Prelevata dal file .env
+        "x-rapidapi-key": os.getenv("RAPID_API_KEY"),
         "x-rapidapi-host": "informazioni-targhe.p.rapidapi.com",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept": "application/json" # <--- IMPEDISCE LE PAGINE HTML DI ERRORE
     }
 
     async with httpx.AsyncClient() as client:
         try:
             # --- FASE 1: SUBMIT (Creazione dell'ordine) ---
             url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
-            payload = {"targhe": [targa_pulita], "type": ["details"]}
             
-            res_submit = await client.post(url_submit, json=payload, headers=headers)
-            res_submit.raise_for_status()
+            # Creiamo il dizionario e lo forziamo in una stringa di testo pura senza spazi extra
+            payload_dict = {"targhe": [targa_pulita], "type": ["details"]}
+            payload_str = json.dumps(payload_dict, separators=(',', ':'))
+            
+            # Usiamo 'content=payload_str' invece di 'json=...' per avere il controllo totale
+            res_submit = await client.post(url_submit, content=payload_str, headers=headers)
+            
+            # Se ci dà ancora errore, ora stamperà il VERO motivo in JSON, non una pagina HTML!
+            if res_submit.status_code != 200:
+                raise HTTPException(status_code=res_submit.status_code, detail=f"Errore dal Provider: {res_submit.text}")
             
             job_id = res_submit.json().get("job_id")
             if not job_id:
                 raise HTTPException(status_code=500, detail="Job ID non ricevuto dal provider.")
+
+            # ... (TUTTO IL RESTO DA FASE 2 IN POI RIMANE IDENTICO A PRIMA) ...
 
             # --- FASE 2: STATUS POLLING (Chiediamo se è pronto) ---
             url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
