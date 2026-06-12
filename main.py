@@ -137,10 +137,11 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             
             # --- FASE 2: STATUS POLLING (Chiediamo se è pronto) ---
             url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
-            job_completato = False
             
-            for tentativo in range(6):
-                await asyncio.sleep(2) 
+            job_completato = False
+            # Aumentiamo la pazienza: 15 tentativi ogni 3 secondi (Max 45 sec)
+            for tentativo in range(15):
+                await asyncio.sleep(3) 
                 res_status = await client.get(url_status, headers=headers)
                 
                 if res_status.status_code != 200:
@@ -151,10 +152,11 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
                     job_completato = True
                     break
                 elif stato_attuale in ["failed", "error"]:
-                    raise HTTPException(status_code=500, detail="Il provider ha fallito l'elaborazione.")
+                    raise HTTPException(status_code=500, detail="Il provider ha fallito l'elaborazione dei dati RCA.")
             
             if not job_completato:
-                raise HTTPException(status_code=408, detail="Timeout: L'API ci ha messo troppo tempo.")
+                # Se fallisce qui, stamperà questo messaggio specifico sull'app
+                raise HTTPException(status_code=408, detail="Timeout Server: Il provider ci ha messo troppo tempo.")
 
             # --- FASE 3: RETRIEVE (Scarichiamo i dati finali) ---
             url_retrieve = f"https://informazioni-targhe.p.rapidapi.com/job/retrieve?job={job_id}"
