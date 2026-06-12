@@ -108,13 +108,6 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
 
     async with httpx.AsyncClient() as client:
         try:
-            ## --- FASE 1: SUBMIT (Creazione dell'ordine) ---
-            url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
-            
-            # IL CODICE SEGRETO SVELATO: "type" è una stringa "rcauto"!
-            payload_str = '{"targhe":["' + targa_pulita + '"],"type":"rcauto"}'
-            
-            try:
             # --- FASE 1: SUBMIT (Creazione dell'ordine) ---
             url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
             
@@ -133,9 +126,7 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
                     detail=f"Job ID mancante. Risposta esatta del provider: {risposta_provider}"
                 )
             
-           
-
-            # FASE 2: STATUS POLLING (Chiediamo se è pronto)
+            # --- FASE 2: STATUS POLLING (Chiediamo se è pronto) ---
             url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
             job_completato = False
             
@@ -156,7 +147,7 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             if not job_completato:
                 raise HTTPException(status_code=408, detail="Timeout: L'API ci ha messo troppo tempo.")
 
-            # FASE 3: RETRIEVE (Scarichiamo i dati finali)
+            # --- FASE 3: RETRIEVE (Scarichiamo i dati finali) ---
             url_retrieve = f"https://informazioni-targhe.p.rapidapi.com/job/retrieve?job={job_id}"
             res_retrieve = await client.get(url_retrieve, headers=headers)
             
@@ -170,7 +161,7 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Errore interno di sistema: {str(e)}")
 
-        # FASE 4: MAPPATURA JSON PER L'APP
+        # --- FASE 4: MAPPATURA JSON PER L'APP ---
         if isinstance(dati_auto, list) and len(dati_auto) > 0:
             dati_auto = dati_auto[0]
             
@@ -303,4 +294,4 @@ def test_sicurezza_gdpr(codice_fiscale: str):
         "2_come_viene_salvato_nel_database": cf_protetto,
         "3_come_lo_legge_per_preventivo": cf_sbloccato,
         "sicurezza": "Conforme al GDPR 🛡️"
-       }
+    }
