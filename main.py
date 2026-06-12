@@ -108,14 +108,17 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
 
     async with httpx.AsyncClient() as client:
         try:
-            # --- FASE 1: SUBMIT (Creazione dell'ordine) ---
-            url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
-            
-            # LA CHIAVE DEFINITIVA: "op" al posto di "type", e "rca" al posto di "rcauto"
-            payload_dict = {
-                "targhe": [targa_pulita],
-                "op": "rca"
-            }
+           # --- FASE 1: SUBMIT (Creazione dell'ordine) ---
+            res_submit = await client.post(url_submit, json=payload_dict, headers=headers)
+            risposta_submit = res_submit.json()
+
+            # CONTROLLO RIVOLUZIONARIO: Il provider ci ha già dato i dati?
+            if "targa" in risposta_submit or "modello" in risposta_submit:
+                # Se sì, saltiamo direttamente alla Fase 4 (Risultato)
+                return risposta_submit 
+
+            # Altrimenti, continuiamo con il job_id come facevamo prima
+            job_id = risposta_submit.get("job_id")
             
             # Lasciamo che Python formatti il JSON in modo immacolato
             res_submit = await client.post(url_submit, json=payload_dict, headers=headers)
