@@ -139,24 +139,30 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
             url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
             
             job_completato = False
-            # Aumentiamo la pazienza: 15 tentativi ogni 3 secondi (Max 45 sec)
+            ultima_risposta = {} # <-- Memoria per spiare cosa dice il server
+            
             for tentativo in range(15):
                 await asyncio.sleep(3) 
                 res_status = await client.get(url_status, headers=headers)
                 
-                if res_status.status_code != 200:
-                    continue 
+                if res_status.status_code == 200:
+                    ultima_risposta = res_status.json()
                     
-                stato_attuale = res_status.json().get("status", "").lower()
-                if stato_attuale in ["completed", "done", "success"]:
-                    job_completato = True
-                    break
-                elif stato_attuale in ["failed", "error"]:
-                    raise HTTPException(status_code=500, detail="Il provider ha fallito l'elaborazione dei dati RCA.")
+                    # Estraiamo lo stato, convertendolo in minuscolo per evitare problemi di maiuscole
+                    stato_attuale = str(ultima_risposta.get("status", "")).lower()
+                    
+                    if stato_attuale in ["completed", "done", "success", "finished", "ready"]:
+                        job_completato = True
+                        break
+                    elif stato_attuale in ["failed", "error"]:
+                        raise HTTPException(status_code=500, detail=f"Fallito: {ultima_risposta}")
             
             if not job_completato:
-                # Se fallisce qui, stamperà questo messaggio specifico sull'app
-                raise HTTPException(status_code=408, detail="Timeout Server: Il provider ci ha messo troppo tempo.")
+                # LA TRAPPOLA: Se va in timeout, stampiamo l'ultimo messaggio esatto del provider!
+                raise HTTPException(
+                    status_code=408, 
+                    detail=f"Timeout! Il provider diceva questo: {ultima_risposta}"
+                )
 
             # --- FASE 3: RETRIEVE (Scarichiamo i dati finali) ---
             url_retrieve = f"https://informazioni-targhe.p.rapidapi.com/job/retrieve?job={job_id}"
