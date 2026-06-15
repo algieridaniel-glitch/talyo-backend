@@ -59,7 +59,7 @@ class RichiestaCheckout(BaseModel):
     compagnia: str
 
 # ========================================================
-# 1. PREVENTIVO (LOGICA OTTIMIZZATA E BLINDATA)
+# 1. PREVENTIVO (LOGICA ANTI-CRASH CON FALLBACK)
 # ========================================================
 @app.post("/preventivo-app")
 async def calcola_preventivo(dati: TargaRicevutaApp):
@@ -70,64 +70,68 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
         "Content-Type": "application/json"
     }
     
-    # Definiamo le variabili locali (fondamentale per evitare errori)
     url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
     payload_dict = {"targhe": [targa_pulita], "op": "rca"}
 
-    # Timeout a 90 secondi per evitare il "taglio" della connessione
+    # Variabili predefinite di emergenza (se RapidAPI fallisce)
+    modello_auto = "Veicolo Sconosciuto"
+    cilindrata_auto = "N/D"
+
     async with httpx.AsyncClient(timeout=httpx.Timeout(90.0)) as client:
         try:
-            # Invio Richiesta
             res_submit = await client.post(url_submit, json=payload_dict, headers=headers)
             
-            # Se errore, mostriamo il dettaglio reale per debuggare
-            if res_submit.status_code != 200:
-                raise HTTPException(status_code=res_submit.status_code, detail=f"ERRORE {res_submit.status_code}: {res_submit.text}")
-            
-            risposta_submit = res_submit.json()
-            
-            # Controllo: il provider ha già i dati o serve polling?
-            if "targa" in risposta_submit or "modello" in risposta_submit:
-                dati_auto = risposta_submit
-            else:
-                job_id = risposta_submit.get("job_id")
-                if not job_id:
-                    raise HTTPException(status_code=500, detail="Job ID mancante dal provider")
+            if res_submit.status_code == 200:
+                risposta_submit = res_submit.json()
                 
-                url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
-                dati_auto = None
-                
-                # Polling pazientoso
-                for _ in range(30):
-                    await asyncio.sleep(4)
-                    res_status = await client.get(url_status, headers=headers)
-                    if res_status.status_code == 200:
-                        risp = res_status.json()
-                        stato = str(risp.get("status") or risp.get("state") or "").lower()
-                        if stato in ["completed", "done", "success"]:
-                            res_ret = await client.get(f"https://informazioni-targhe.p.rapidapi.com/job/retrieve?job={job_id}", headers=headers)
-                            dati_auto = res_ret.json()
-                            break
-                        elif stato in ["failed", "error"]:
-                            raise HTTPException(status_code=500, detail="Errore elaborazione provider")
-                
-                if not dati_auto:
-                    raise HTTPException(status_code=408, detail="Timeout: Elaborazione troppo lunga")
-
-            # Mappatura finale per l'App
-            if isinstance(dati_auto, list): dati_auto = dati_auto[0]
+                if "targa" in risposta_submit or "modello" in risposta_submit:
+                    dati_auto = risposta_submit
+                    modello_auto = dati_auto.get("modello", modello_auto)
+                    cilindrata_auto = str(dati_auto.get("cilindrata", cilindrata_auto))
+                else:
+                    job_id = risposta_submit.get("job_id")
+                    if job_id:
+                        url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
+                        
+                        # Riduciamo il polling a max 15 secondi (per non far stancare l'App Android)
+                        for _ in range(5): 
+                            await asyncio.sleep(3)
+                            res_status = await client.get(url_status, headers=headers)
+                            if res_status.status_code == 200:
+                                risp = res_status.json()
+                                stato = str(risp.get("status") or risp.get("state") or "").lower()
+                                if stato in ["completed", "done", "success"]:
+                                    res_ret = await client.get(f"https://informazioni-targhe.p.rapidapi.com/job/retrieve?job={job_id}", headers=headers)
+                                    dati_auto = res_ret.json()
+                                    if isinstance(dati_auto, list) and len(dati_auto) > 0:
+                                        dati_auto = dati_auto[0]
+                                    
+                                    modello_auto = dati_auto.get("modello", modello_auto)
+                                    cilindrata_auto = str(dati_auto.get("cilindrata", cilindrata_auto))
+                                    break
             
+            # Restituiamo SEMPRE una risposta, anche se RapidAPI ha fallito
             return {
                 "preventivo_id": str(uuid.uuid4()),
                 "targa": targa_pulita,
-                "modello": dati_auto.get("modello", "Modello Sconosciuto"),
+                "modello": modello_auto,
                 "compagnia_attuale": "Verificata",
-                "cilindrata": str(dati_auto.get("cilindrata", "N/D")),
-                "prezzo_stimato_min": 249.00,
-                "prezzo_stimato_max": 430.00
+                "cilindrata": cilindrata_auto,
+                "prezzo_stimato_min": 249, 
+                "prezzo_stimato_max": 430   
             }
+
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Errore critico: {str(e)}")
+            # Se cade la rete del server, restituiamo comunque il fallback!
+            return {
+                "preventivo_id": str(uuid.uuid4()),
+                "targa": targa_pulita,
+                "modello": "Dati offline",
+                "compagnia_attuale": "N/D",
+                "cilindrata": "N/D",
+                "prezzo_stimato_min": 249,
+                "prezzo_stimato_max": 430
+            }
 
 # ========================================================
 # 2. OCR, STRIPE, ADMIN E GDPR
