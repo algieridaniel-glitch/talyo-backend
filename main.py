@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-# Import dei tuoi file locali (assicurati che esistano)
-from database import inizializza_db, SessionLocal, PolizzaAutovettura, ScansioneRadar
+# Import dei file locali
+from database import inizializza_db, SessionLocal, PolizzaAutovettura, ScansioneRadar, PreventivoCache
 from radar_worker import scheduler
 from security import cripta_codice_fiscale, decripta_codice_fiscale
 
@@ -59,11 +59,28 @@ class RichiestaCheckout(BaseModel):
     compagnia: str
 
 # ========================================================
-# 1. PREVENTIVO (LOGICA ANTI-CRASH CON FALLBACK)
+# 1. PREVENTIVO (CACHE INTERNA + API ESTERNA + FALLBACK)
 # ========================================================
 @app.post("/preventivo-app")
-async def calcola_preventivo(dati: TargaRicevutaApp):
+async def calcola_preventivo(dati: TargaRicevutaApp, db: Session = Depends(get_db)):
     targa_pulita = dati.targa.upper().replace(" ", "").strip()
+    
+    # --- FASE 1: CONTROLLO CACHE (MEMORIA DEL SERVER) ---
+    preventivo_salvato = db.query(PreventivoCache).filter(PreventivoCache.targa == targa_pulita).first()
+    if preventivo_salvato:
+        print(f"🚀 Targa {targa_pulita} trovata in memoria locale! Risposta immediata.")
+        return {
+            "preventivo_id": str(preventivo_salvato.id),
+            "targa": preventivo_salvato.targa,
+            "modello": preventivo_salvato.modello,
+            "compagnia_attuale": preventivo_salvato.compagnia_attuale,
+            "cilindrata": preventivo_salvato.cilindrata,
+            "prezzo_stimato_min": preventivo_salvato.prezzo_min,
+            "prezzo_stimato_max": preventivo_salvato.prezzo_max
+        }
+
+    # --- FASE 2: SE NON ESISTE, CHIAMA RAPID API ---
+    print(f"🔍 Targa {targa_pulita} non in memoria. Interrogo RapidAPI...")
     headers = {
         "x-rapidapi-key": RAPID_API_KEY,
         "x-rapidapi-host": "informazioni-targhe.p.rapidapi.com",
@@ -73,9 +90,10 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
     url_submit = "https://informazioni-targhe.p.rapidapi.com/job/submit"
     payload_dict = {"targhe": [targa_pulita], "op": "rca"}
 
-    # Variabili predefinite di emergenza (se RapidAPI fallisce)
-    modello_auto = "Veicolo Sconosciuto"
+    # Valori di default (Piano B)
+    modello_auto = "Dati offline"
     cilindrata_auto = "N/D"
+    compagnia = "Verificata"
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(90.0)) as client:
         try:
@@ -86,14 +104,12 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
                 
                 if "targa" in risposta_submit or "modello" in risposta_submit:
                     dati_auto = risposta_submit
-                    modello_auto = dati_auto.get("modello", modello_auto)
-                    cilindrata_auto = str(dati_auto.get("cilindrata", cilindrata_auto))
+                    modello_auto = dati_auto.get("modello", "Veicolo Sconosciuto")
+                    cilindrata_auto = str(dati_auto.get("cilindrata", "N/D"))
                 else:
                     job_id = risposta_submit.get("job_id")
                     if job_id:
                         url_status = f"https://informazioni-targhe.p.rapidapi.com/job/status?job={job_id}"
-                        
-                        # Riduciamo il polling a max 15 secondi (per non far stancare l'App Android)
                         for _ in range(5): 
                             await asyncio.sleep(3)
                             res_status = await client.get(url_status, headers=headers)
@@ -106,32 +122,42 @@ async def calcola_preventivo(dati: TargaRicevutaApp):
                                     if isinstance(dati_auto, list) and len(dati_auto) > 0:
                                         dati_auto = dati_auto[0]
                                     
-                                    modello_auto = dati_auto.get("modello", modello_auto)
-                                    cilindrata_auto = str(dati_auto.get("cilindrata", cilindrata_auto))
+                                    modello_auto = dati_auto.get("modello", "Veicolo Sconosciuto")
+                                    cilindrata_auto = str(dati_auto.get("cilindrata", "N/D"))
                                     break
-            
-            # Restituiamo SEMPRE una risposta, anche se RapidAPI ha fallito
-            return {
-                "preventivo_id": str(uuid.uuid4()),
-                "targa": targa_pulita,
-                "modello": modello_auto,
-                "compagnia_attuale": "Verificata",
-                "cilindrata": cilindrata_auto,
-                "prezzo_stimato_min": 249, 
-                "prezzo_stimato_max": 430   
-            }
-
         except Exception as e:
-            # Se cade la rete del server, restituiamo comunque il fallback!
-            return {
-                "preventivo_id": str(uuid.uuid4()),
-                "targa": targa_pulita,
-                "modello": "Dati offline",
-                "compagnia_attuale": "N/D",
-                "cilindrata": "N/D",
-                "prezzo_stimato_min": 249,
-                "prezzo_stimato_max": 430
-            }
+            print(f"⚠️ Errore API o Timeout. Uso dati di Fallback per {targa_pulita}")
+            compagnia = "N/D"
+
+    # Preparazione dei dati finali
+    risposta_finale = {
+        "preventivo_id": str(uuid.uuid4()),
+        "targa": targa_pulita,
+        "modello": modello_auto,
+        "compagnia_attuale": compagnia,
+        "cilindrata": cilindrata_auto,
+        "prezzo_stimato_min": 249.0, 
+        "prezzo_stimato_max": 430.0   
+    }
+
+    # --- FASE 3: SALVATAGGIO NEL DATABASE ---
+    try:
+        nuovo_preventivo = PreventivoCache(
+            targa=risposta_finale["targa"],
+            modello=risposta_finale["modello"],
+            compagnia_attuale=risposta_finale["compagnia_attuale"],
+            prezzo_min=risposta_finale["prezzo_stimato_min"],
+            prezzo_max=risposta_finale["prezzo_stimato_max"],
+            cilindrata=risposta_finale["cilindrata"]
+        )
+        db.add(nuovo_preventivo)
+        db.commit()
+        print(f"💾 Dati per la targa {targa_pulita} salvati con successo nel Database.")
+    except Exception as db_err:
+        db.rollback()
+        print(f"❌ Errore durante il salvataggio nel DB: {db_err}")
+
+    return risposta_finale
 
 # ========================================================
 # 2. OCR, STRIPE, ADMIN E GDPR
